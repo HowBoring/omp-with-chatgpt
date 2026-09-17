@@ -55,6 +55,7 @@ import {
 } from "../session/state.js";
 import { appendExecutionRecord } from "../execution/records.js";
 import { saveExecutionOutput } from "../execution/output.js";
+import { resolveBrowserConfig, saveBrowserConfig, verifyBrowserBackend } from "../browser/backend.js";
 
 const program = new Command();
 
@@ -1171,6 +1172,94 @@ acceptUnusedWorkspaceOption(
     } catch (error) {
       handleCliError(error, opts.json);
     }
+  });
+
+// ---------------------------------------------------------------- browser backend
+
+const browserCmd = program
+  .command("browser")
+  .description("Choose or verify the dedicated C2C browser backend (never the daily browser)");
+
+acceptUnusedWorkspaceOption(
+  browserCmd
+    .command("status", { isDefault: true })
+    .description("Show the resolved browser backend and its verification state")
+    .option("--json", "machine-readable output", false)
+)
+  .action(async (opts: { json: boolean }) => {
+    const config = resolveBrowserConfig();
+    const verification = await verifyBrowserBackend(config);
+    const payload = {
+      ok: verification.ok,
+      backend: config.backend,
+      cdpUrl: config.cdpUrl ?? null,
+      profileDir: config.profileDir ?? null,
+      verification,
+    };
+    if (opts.json) {
+      say(JSON.stringify(payload));
+      return;
+    }
+    say(`浏览器后端：${config.backend}${config.cdpUrl ? ` (${config.cdpUrl})` : ""}`);
+    if (verification.ok) {
+      check(verification.detail);
+    } else {
+      cross(verification.reason);
+      say("需要你完成一步：");
+      say(verification.action);
+      process.exitCode = 1;
+    }
+  });
+
+acceptUnusedWorkspaceOption(
+  browserCmd
+    .command("set")
+    .description("Select the browser backend: omp (default) or cdp (dedicated CDP endpoint)")
+    .requiredOption("--backend <backend>", "omp | cdp")
+    .option("--cdp-url <url>", "CDP endpoint, e.g. http://127.0.0.1:9223 (cdp backend)")
+    .option("--profile-dir <path>", "dedicated profile directory the endpoint runs with (cdp backend)")
+    .option("--json", "machine-readable output", false)
+)
+  .action((opts: { backend: string; cdpUrl?: string; profileDir?: string; json: boolean }) => {
+    try {
+      const backend = opts.backend.trim().toLowerCase();
+      if (backend !== "omp" && backend !== "cdp") {
+        throw new Error("backend must be one of omp, cdp");
+      }
+      const saved = saveBrowserConfig({
+        backend,
+        cdpUrl: opts.cdpUrl,
+        profileDir: opts.profileDir,
+      });
+      if (opts.json) {
+        say(JSON.stringify({ ok: true, ...saved }));
+        return;
+      }
+      check(`已记住浏览器后端：${saved.backend}`);
+    } catch (error) {
+      handleCliError(error, opts.json);
+    }
+  });
+
+acceptUnusedWorkspaceOption(
+  browserCmd
+    .command("verify")
+    .description("Verify the configured backend endpoint and dedicated profile before ChatGPT use")
+    .option("--json", "machine-readable output", false)
+)
+  .action(async (opts: { json: boolean }) => {
+    const config = resolveBrowserConfig();
+    const verification = await verifyBrowserBackend(config);
+    if (opts.json) {
+      say(JSON.stringify({ ok: verification.ok, backend: config.backend, verification }));
+    } else if (verification.ok) {
+      check(verification.detail);
+    } else {
+      cross(verification.reason);
+      say("需要你完成一步：");
+      say(verification.action);
+    }
+    if (!verification.ok) process.exitCode = 1;
   });
 
 function handleCliError(error: unknown, json: boolean): void {
