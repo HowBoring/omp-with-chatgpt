@@ -372,16 +372,22 @@ export function createMcpServer(ctx: McpContext): McpServer {
       description:
         `Summary of the most recent test run reported by the OMP harness. This does NOT run ` +
         `tests; it reads the latest execution record. ${UNTRUSTED_NOTE}`,
-      inputSchema: {},
+      inputSchema: {
+        taskId: z.string().min(1).optional(),
+        iteration: z.number().int().nonnegative().optional(),
+      },
       outputSchema: testStatusOutputSchema,
       annotations: { readOnlyHint: true },
     },
-    async (_args, extra) => {
+    async (args, extra) => {
       const denied = requireScope(extra.authInfo, "execution.read");
       if (denied) return denied;
-      const latest = latestExecutionRecord(workspace.id);
+      const latest = latestExecutionRecord(workspace.id, {
+        taskId: args.taskId,
+        iteration: args.iteration,
+      });
       if (!latest) {
-        return okStructured({ available: false, message: "No execution records yet for this workspace." });
+        return okStructured({ available: false, message: "No execution records yet for this workspace (matching the given task/iteration filters, if any)." });
       }
       return okStructured({
         available: true,
@@ -402,9 +408,12 @@ export function createMcpServer(ctx: McpContext): McpServer {
       title: "Execution summary",
       description:
         `Recent OMP execution records for this workspace: task id, iteration, changed files, ` +
-        `tests and exit status. Use it after OMP reports EXECUTED. ${UNTRUSTED_NOTE}`,
+        `tests and exit status. Use it after OMP reports EXECUTED. Optional taskId/iteration ` +
+        `filters scope the query to one task. ${UNTRUSTED_NOTE}`,
       inputSchema: {
         limit: z.number().int().min(1).max(50).default(5),
+        taskId: z.string().min(1).optional(),
+        iteration: z.number().int().nonnegative().optional(),
       },
       outputSchema: executionSummaryOutputSchema,
       annotations: { readOnlyHint: true },
@@ -412,7 +421,13 @@ export function createMcpServer(ctx: McpContext): McpServer {
     async (args, extra) => {
       const denied = requireScope(extra.authInfo, "execution.read");
       if (denied) return denied;
-      return okStructured({ records: readExecutionRecords(workspace.id, args.limit) });
+      return okStructured({
+        records: readExecutionRecords(workspace.id, {
+          limit: args.limit,
+          taskId: args.taskId,
+          iteration: args.iteration,
+        }),
+      });
     }
   );
 
@@ -428,6 +443,8 @@ export function createMcpServer(ctx: McpContext): McpServer {
         action: z.enum(["list", "read"]).default("list"),
         id: z.number().int().positive().optional(),
         limit: z.number().int().min(1).max(50).default(20),
+        taskId: z.string().min(1).optional(),
+        iteration: z.number().int().nonnegative().optional(),
       },
       outputSchema: executionOutputOutputSchema,
       annotations: { readOnlyHint: true },
@@ -437,7 +454,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
       if (denied) return denied;
       const action = args.action ?? "list";
       if (action === "list") {
-        const items = listExecutionOutputs(workspace.id, args.limit).map((item) => ({
+        const items = listExecutionOutputs(workspace.id, args.limit)
+          .filter((item) => args.taskId === undefined || item.taskId === args.taskId)
+          .filter((item) => args.iteration === undefined || item.iteration === args.iteration)
+          .map((item) => ({
           id: item.id,
           command: item.command,
           exitCode: item.exitCode,

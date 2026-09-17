@@ -60,6 +60,19 @@ describe("c2c record", () => {
     });
   });
 
+  it("rejects a missing task id without recording the execution", () => {
+    withRecordEnvironment((root, workspace) => {
+      const result = spawnSync(
+        process.execPath,
+        ["--import", "tsx", cliEntry, "record", "--workspace", root, "--iteration", "1"],
+        { cwd: projectRoot, encoding: "utf8", env: process.env }
+      );
+
+      expect(result.status).toBe(1);
+      expect(readExecutionRecords(workspace.id)).toEqual([]);
+    });
+  });
+
   it("rejects a non-integer iteration without recording the execution", () => {
     withRecordEnvironment((root, workspace) => {
       const result = runRecord(root, ["--iteration", "abc"]);

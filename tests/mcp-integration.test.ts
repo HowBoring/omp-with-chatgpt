@@ -249,6 +249,46 @@ describe("MCP tools over Streamable HTTP", () => {
     expect(summary.records.map((record) => record.taskId)).toEqual(["c2c_valid_before_invalid"]);
   });
 
+  it("scopes execution evidence per task when one workspace has two tasks", async () => {
+    appendExecutionRecord(bridge.workspace.id, {
+      taskId: "c2c_alpha",
+      iteration: 1,
+      changedFiles: 2,
+      tests: "11 passed",
+      exitStatus: "ok",
+      timestamp: new Date().toISOString(),
+    });
+    appendExecutionRecord(bridge.workspace.id, {
+      taskId: "c2c_beta",
+      iteration: 1,
+      changedFiles: 5,
+      tests: "3 failed",
+      exitStatus: "failed",
+      timestamp: new Date().toISOString(),
+    });
+
+    const alphaStatus = structuredJsonOf<{ taskId: string; tests: string }>(
+      await client.callTool({ name: "test_status", arguments: { taskId: "c2c_alpha" } })
+    );
+    expect(alphaStatus.taskId).toBe("c2c_alpha");
+    expect(alphaStatus.tests).toBe("11 passed");
+
+    const betaSummary = structuredJsonOf<{ records: { taskId: string; exitStatus: string }[] }>(
+      await client.callTool({
+        name: "execution_summary",
+        arguments: { taskId: "c2c_beta", iteration: 1 },
+      })
+    );
+    expect(betaSummary.records).toEqual([
+      expect.objectContaining({ taskId: "c2c_beta", exitStatus: "failed" }),
+    ]);
+
+    const unknown = structuredJsonOf<{ available: boolean }>(
+      await client.callTool({ name: "test_status", arguments: { taskId: "c2c_unknown" } })
+    );
+    expect(unknown.available).toBe(false);
+  });
+
   it("execution_output lists readable items and refuses restricted bodies", async () => {
     const readable = saveExecutionOutput(bridge.workspace.id, {
       command: "pnpm test",
