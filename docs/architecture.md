@@ -24,13 +24,13 @@
              └──────────▲──────────┘
                         │ edit / shell / git / test
              ┌──────────┴──────────┐
-             │  Codex Harness      │
+             │  OMP Harness      │
              └─────────────────────┘
 ```
 
 ## Principles
 
-- **ChatGPT thinks. Codex works.** The bridge never re-implements a coding harness.
+- **ChatGPT thinks. OMP works.** The bridge never re-implements a coding harness.
 - **Computer Use = control plane**: tiny `[C2C]` state messages (< 1 KB).
 - **MCP = data plane**: ChatGPT pulls files/diffs/search results itself.
 - **Read-only by design**: no write/exec tools exist in V1 at all.

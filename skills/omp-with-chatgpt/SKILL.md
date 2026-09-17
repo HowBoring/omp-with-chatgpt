@@ -646,7 +646,7 @@ If status is restricted, ignore it and review from git_diff.
    that is the extension enforcing "review before new edits", not an error.
 8. ChatGPT reviews via MCP (`git_diff`, `read_file`, `test_status`,
    `execution_output`) and replies DONE / PLAN (next iteration) / BLOCKED.
-   When the reply arrives: `/c2c-checkpoint "state=REVIEW_DONE"` clears the
+   When the reply arrives: `/c2c-checkpoint "state=DONE waiting=none"` clears the
    gate, then act on the reply.
 9. Loop. Respect maxIterations (`.c2c.json`, default 12). At the limit, pause and ask
    the user: "已完成 12 轮协作，仍有未解决问题，是否继续？"
@@ -745,7 +745,7 @@ the previous public address is gone. Doctor already started a new one.
 | Pairing code rejected/expired | `c2c pair --json` for a fresh code |
 | Same explicit ChatGPT setup/reconnect browser configuration step fails twice after repair | Stop automating ChatGPT settings and use **Guided manual ChatGPT setup fallback**. Do not count browser/js timeout, loading/generating, or login/2FA waiting as failures. |
 | Port conflict | handled automatically; never surface to the user |
-| Modifying tools blocked / cannot end session while waiting for review | The task checkpoint says `waiting=GPT_REVIEW`. Go read ChatGPT's reply (same tab), then `/c2c-checkpoint "state=REVIEW_DONE"`. Do not `/c2c-cancel` just to escape the gate. |
+| Modifying tools blocked / cannot end session while waiting for review | The task checkpoint says `waiting=GPT_REVIEW`. Go read ChatGPT's reply (same tab), then `/c2c-checkpoint "state=DONE waiting=none"`. Do not `/c2c-cancel` just to escape the gate. |
 | `/c2c-status` shows an active task owned by an exited session | Explicit user command only: `/c2c-takeover`. A wait timeout never proves the owner is gone. |
 | cloudflared missing | install it yourself (brew/winget), then retry |
 | Sidebar has no「项目」 | Ask the user to hover「聊天」, click the …, choose「按项目整理」 |

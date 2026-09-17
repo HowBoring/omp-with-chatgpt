@@ -20,7 +20,7 @@ second bridge and do not Delete the ChatGPT connector. Wait and run doctor
 again. The local process may still be running.
 
 ### Everything was quit and ChatGPT can no longer connect
-Quitting Codex / the terminal stops the public address. The next `c2c doctor`
+Quitting OMP / the terminal stops the public address. The next `c2c doctor`
 starts a new address and sets `chatgptRepair.needed`. The Skill should tell the
 user that the old address expired, then **Delete** THIS workspace's
 connector (`chatgptRepair.connectorName`) and create it again with the new
@@ -50,9 +50,9 @@ the connector; the address did not change.
 
 ### I have a Cloudflare domain and want a stable hostname
 During first-time setup (or the next coding session, once), say you have a
-Cloudflare account and give the domain. Codex opens a browser for Cloudflare
+Cloudflare account and give the domain. OMP opens a browser for Cloudflare
 login, then keeps `c2c-<project>.your-domain.com`. To stay on the temporary
-address, say you do not have a domain. Switching later: tell Codex you want
+address, say you do not have a domain. Switching later: tell OMP you want
 the stable hostname; it runs `c2c tunnel choose --mode named --zone <domain>`.
 
 ### "配对码无效/过期"
@@ -84,16 +84,22 @@ The Skill installs this automatically during setup.
 If cloudflared is installed in a custom location that is not on `PATH`, set
 `C2C_CLOUDFLARED_PATH` to the executable's absolute path before running `c2c`.
 
-### Every new Codex chat “repairs” the connection / cannot write logs
-The C2C state directory lives outside the project (macOS:
-`~/Library/Application Support/codex-with-chatgpt`; Windows:
-`%LOCALAPPDATA%\codex-with-chatgpt`). Codex's default sandbox cannot write
-there, so each new chat looks like a health-check failure.
+### Modifying tools are blocked / the session cannot stop while waiting for review
+Working as intended: the active C2C task's checkpoint says
+`waitingFor=GPT_REVIEW`, so the OMP extension gates modifying tools and
+`session_stop` until the review lands. Read ChatGPT's reply in the saved
+chat, then continue the protocol (`/c2c-checkpoint "state=DONE waiting=none"`).
+Do not cancel the task to escape the gate.
 
-`c2c setup`, `c2c doctor` and `c2c sandbox-allow` add that directory to
-`[sandbox_workspace_write].writable_roots` in `~/.codex/config.toml`
-(`%USERPROFILE%\.codex\config.toml` on Windows). After that, later chats
-do not need elevation.
+### /c2c-status shows a task owned by an exited session
+Takeover is explicit: run `/c2c-takeover` only after the owning OMP session
+has actually exited. A wait timeout never proves the owner is gone.
+
+### Browser backend does not verify
+`c2c browser status --json` shows the configured backend and the failure
+reason; `verification.action` is the single user action to take (usually
+`bash scripts/wsl2-edge-cdp.sh` on WSL2). ChatGPT steps must not run until
+verification is green, and never fall back to the daily browser.
 
 ### Port already in use
 Handled automatically: an existing healthy bridge for the same workspace is
@@ -107,12 +113,12 @@ Working as intended: `.env`, keys, credentials and anything matched by
 ### I cannot see Projects in the ChatGPT sidebar
 Hover **Chats** /「聊天」, click the … that appears, and choose
 **Organize by project** /「按项目整理」. Then create a project named after
-this workspace, with **project-only memory**. Tell Codex「好了」when the
+this workspace, with **project-only memory**. Tell OMP「好了」when the
 collection page is open (`https://chatgpt.com/g/g-p-…/project`).
 
 ### This workspace opened the wrong ChatGPT Project
 Do not pick another project by name automatically. Open the collection that
-matches this workspace and tell Codex「已找到」, or say you want the old
+matches this workspace and tell OMP「已找到」, or say you want the old
 long-chat instead. Each workspace has its own Project and its own connector.
 
 ### Completely stuck

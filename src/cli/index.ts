@@ -763,6 +763,26 @@ function runGit(args: string[]): { ok: boolean; stdout: string } {
   return { ok: result.status === 0, stdout: (result.stdout ?? "").trim() };
 }
 
+/** Any active C2C task in any workspace blocks applying an update (issue #14). */
+function activeC2CTaskCount(): number {
+  const dir = path.join(getStateDir(), "tasks");
+  let count = 0;
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.endsWith(".json")) continue;
+      try {
+        const task = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")) as { state?: string };
+        if (task.state === "active") count += 1;
+      } catch {
+        // unreadable task file: not evidence of an active task
+      }
+    }
+  } catch {
+    // no tasks directory: no active tasks
+  }
+  return count;
+}
+
 acceptUnusedWorkspaceOption(
   program
     .command("update-check")
@@ -787,9 +807,26 @@ acceptUnusedWorkspaceOption(
       remoteCommit?: string;
       note?: string;
     }): void => {
-      if (opts.json) say(JSON.stringify({ ok: true, version: VERSION, ...data }));
-      else if (data.updateAvailable) say(`发现新版本（本地 ${data.localCommit?.slice(0, 7)} → 远端 ${data.remoteCommit?.slice(0, 7)}）。`);
-      else say(data.note ?? "已是最新版本。");
+      // Deferral (issue #14): an available update is reported but must not be
+      // applied while any workspace has an active C2C task. Applying it always
+      // requires an OMP reload so the linked extension/skill reload.
+      const activeTasks = data.updateAvailable ? activeC2CTaskCount() : 0;
+      const deferred = data.updateAvailable && activeTasks > 0;
+      const payload = {
+        ok: true,
+        version: VERSION,
+        ...data,
+        ...(data.updateAvailable ? { deferred, reloadRequired: true as const } : {}),
+      };
+      if (opts.json) {
+        say(JSON.stringify(payload));
+      } else if (data.updateAvailable && deferred) {
+        say(`发现新版本（本地 ${data.localCommit?.slice(0, 7)} → 远端 ${data.remoteCommit?.slice(0, 7)}），但有进行中的 C2C 任务，更新推迟到任务完成后。`);
+      } else if (data.updateAvailable) {
+        say(`发现新版本（本地 ${data.localCommit?.slice(0, 7)} → 远端 ${data.remoteCommit?.slice(0, 7)}）。更新后需要重启 OMP 会话以加载新版本。`);
+      } else {
+        say(data.note ?? "已是最新版本。");
+      }
     };
 
     if (!opts.force && last.date === today) {

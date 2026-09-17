@@ -28,7 +28,7 @@
 | Tunnel exposure | Bridge binds 127.0.0.1 only (refuses 0.0.0.0); the only public surface is HTTPS via the tunnel, protected by OAuth; `/health` reveals only a salted workspace hash |
 | Admin API abuse | Loopback-only + random admin token (0600 runtime file) + requests with proxy headers (`cf-connecting-ip`, `x-forwarded-for`) rejected; unauthenticated probes get 404 |
 | Log credential leakage | Logger redacts token prefixes, bearer headers, token-like parameters, and pairing-code-shaped strings before writing |
-| Execution output leak | Codex may nominate test/build/lint logs; a local sanitizer redacts tokens, pairing-code-shaped strings and home paths, truncates size, and refuses private-key blocks entirely. Restricted items are listed without a body. ChatGPT still cannot run commands. |
+| Execution output leak | OMP may nominate test/build/lint logs; a local sanitizer redacts tokens, pairing-code-shaped strings and home paths, truncates size, and refuses private-key blocks entirely. Restricted items are listed without a body. ChatGPT still cannot run commands. |
 | Checkpoint / resume dump | Session checkpoints store short protocol fields only (capped). Resume uses the existing chat or HANDOFF — no new protocol state, no log paste, no re-pairing. |
 
 ## Token & scope design
@@ -41,7 +41,9 @@ Access tokens: 1 hour. Refresh tokens: 30 days, rotated. All tokens bound to
 ## Storage
 
 State lives under the OS-convention app dir
-(`~/Library/Application Support/codex-with-chatgpt` on macOS), directories 0700,
+(`~/.local/state/omp-with-chatgpt` on Linux,
+`~/Library/Application Support/omp-with-chatgpt` on macOS,
+`%LOCALAPPDATA%\omp-with-chatgpt` on Windows), directories 0700,
 files 0600. Named-hostname preference and tunnel metadata live there too
 (`tunnels/<workspaceId>.json`) — never in the project. Only SHA-256 hashes of
 tokens are persisted — a stolen state file does not yield usable bearer tokens.
