@@ -62,7 +62,7 @@ export function sanitizeConnectorLabel(name: string, workspaceId: string): strin
 /**
  * Same workspace keeps one connector title forever.
  * A workspace already recorded without a title stays on the original
- * "Codex with ChatGPT" name. A new workspace gets a distinct title.
+ * "OMP with ChatGPT" name. A new workspace gets a distinct title.
  */
 export function connectorNameFor(opts: {
   workspaceName: string;

@@ -26,7 +26,6 @@ import {
 } from "../tunnel/state.js";
 import { Logger } from "../logger/index.js";
 import { getStateDir } from "../config/paths.js";
-import { ensureSandboxAllowlist, getCodexConfigPath, isStateDirAllowlisted } from "../config/sandbox-allow.js";
 import { mergeUiPrefs, readUiPrefs, SETUP_MODES, type SetupMode } from "../config/ui-prefs.js";
 import {
   CHATGPT_CREATE_CONNECTOR_URL,
@@ -154,16 +153,6 @@ function tunnelChoicePayload(workspace: Workspace, zoneHint?: string): Record<st
   };
 }
 
-function trySandboxAllow():
-  | { ok: true; added: boolean; alreadyAllowed: boolean; stateDir: string; configPath: string }
-  | { ok: false; added: false; alreadyAllowed: false; error: string } {
-  try {
-    const result = ensureSandboxAllowlist();
-    return { ok: true, ...result };
-  } catch (error) {
-    return { ok: false, added: false, alreadyAllowed: false, error: (error as Error).message };
-  }
-}
 
 interface TunnelStartResponse {
   url?: string;
@@ -213,7 +202,7 @@ async function ensureBridgeAndTunnel(
 
 program
   .name("c2c")
-  .description(`${PRODUCT_NAME} — ChatGPT thinks. Codex works.`)
+  .description(`${PRODUCT_NAME} — ChatGPT thinks. OMP works.`)
   .version(VERSION, "-v, --version")
   .configureHelp({ sortSubcommands: true });
 
@@ -294,7 +283,6 @@ program
         say("正在连接 ChatGPT…");
         say("");
       }
-      const sandbox = trySandboxAllow();
       const { runtime, info, mcpUrl } = await ensureBridgeAndTunnel(root, { tunnel: opts.tunnel });
       const connectorName = mcpUrl
         ? persistWorkspaceEndpoint({
@@ -319,11 +307,9 @@ program
             workspaceId: info.workspaceId,
             workspaceName: info.workspaceName,
             connectorName,
-            mcpUrl: mcpUrl ?? `http://127.0.0.1:${runtime.port}/mcp`,
             local: mcpUrl === null,
             pairingCode: pairingResult.code,
             pairingExpiresAt: pairingResult.expiresAt,
-            sandbox,
             tunnel: {
               mode: isNamedTunnelReady(tunnelState) ? "named" : "quick",
               hostname: tunnelState.hostname ?? null,
@@ -341,7 +327,7 @@ program
       say(`配对码：${pairingResult.code}（${Math.round((pairingResult.expiresAt - Date.now()) / 60000)} 分钟内有效）`);
       say("");
       say("下一步：在 ChatGPT 的连接器设置中添加以上地址（OAuth），并在授权页输入配对码。");
-      say("如果你在使用 Codex Skill，这一步会自动完成。");
+      say("如果你在使用 OMP Skill，这一步会自动完成。");
     } catch (error) {
       handleCliError(error, opts.json);
     }
@@ -433,25 +419,7 @@ program
     const nodeMajor = parseInt(process.versions.node.split(".")[0], 10);
     report.node = { ok: nodeMajor >= 20, detail: `v${process.versions.node}` };
 
-    // Codex sandbox writable_roots (so later chats do not need elevation)
-    if (opts.fix) {
-      const sandbox = trySandboxAllow();
-      if (sandbox.ok) {
-        report.sandbox = { ok: true, detail: sandbox.alreadyAllowed ? "已在白名单" : "已写入白名单" };
-        if (sandbox.added) results.push("已将本地设置目录加入 Codex 沙箱白名单");
-      } else {
-        report.sandbox = { ok: false, detail: sandbox.error };
-      }
-    } else {
-      try {
-        const configPath = getCodexConfigPath();
-        const allowed =
-          fs.existsSync(configPath) && isStateDirAllowlisted(fs.readFileSync(configPath, "utf8"), getStateDir());
-        report.sandbox = allowed ? { ok: true, detail: "已在白名单" } : { ok: false, detail: "未在白名单" };
-      } catch (error) {
-        report.sandbox = { ok: false, detail: (error as Error).message };
-      }
-    }
+    // OMP keeps its state under its own state directory; no external sandbox config.
 
     // Workspace
     let workspace: Workspace | null = null;
@@ -660,7 +628,6 @@ program
     say("");
     const labels: Record<string, string> = {
       node: "Node.js",
-      sandbox: "Sandbox",
       workspace: "Workspace",
       bridge: "Bridge",
       mcp: "MCP",
@@ -778,30 +745,6 @@ program
       say(`类型：${data.projectType}  语言：${data.languages.join(", ") || "-"}`);
       say(`路径：${data.root}`);
     }
-  });
-
-// ---------------------------------------------------------------- sandbox-allow (Codex writable_roots, macOS + Windows)
-
-acceptUnusedWorkspaceOption(
-  program
-    .command("sandbox-allow")
-    .description("Add the local settings directory to the Codex sandbox allowlist")
-    .option("--json", "machine-readable output", false)
-)
-  .action((opts: { json: boolean }) => {
-    const result = trySandboxAllow();
-    if (opts.json) {
-      say(JSON.stringify(result));
-      if (!result.ok) process.exitCode = 1;
-      return;
-    }
-    if (!result.ok) {
-      cross(`无法写入 Codex 沙箱白名单：${result.error}`);
-      process.exitCode = 1;
-      return;
-    }
-    if (result.alreadyAllowed) check("沙箱白名单已就绪，后续对话无需再提权");
-    else check("已将本地设置目录加入 Codex 沙箱白名单（后续对话无需再提权）");
   });
 
 // ---------------------------------------------------------------- update-check (once per local day)
@@ -1056,7 +999,7 @@ acceptUnusedWorkspaceOption(
 
 program
   .command("record", { hidden: true })
-  .description("Record a Codex execution summary (used by the Skill)")
+  .description("Record an OMP execution summary (used by the Skill)")
   .option("-w, --workspace <path>")
   .requiredOption("--task <id>")
   .requiredOption("--iteration <n>", "non-negative execution iteration", parseNonNegativeInteger)
