@@ -91,7 +91,7 @@ describe("buildStatusMessage", () => {
 });
 
 describe("extension registration surface", () => {
-  it("registers only the c2c-status command and no prompt hooks", () => {
+  it("registers the five c2c task commands and no prompt hooks", () => {
     const calls: string[] = [];
     const pi = {
       setLabel: (_label: string) => {
@@ -109,6 +109,10 @@ describe("extension registration surface", () => {
     };
     ompWithChatGPT(pi);
     expect(calls).toContain("registerCommand:c2c-status");
+    expect(calls).toContain("registerCommand:c2c-enable");
+    expect(calls).toContain("registerCommand:c2c-cancel");
+    expect(calls).toContain("registerCommand:c2c-finish");
+    expect(calls).toContain("registerCommand:c2c-takeover");
     expect(calls).not.toContain("on");
     expect(calls).not.toContain("registerTool");
   });
