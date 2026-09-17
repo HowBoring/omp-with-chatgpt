@@ -510,7 +510,7 @@ program
           previousName: lastEndpoint?.connectorName,
           hadEndpointBefore: Boolean(lastEndpoint),
         })
-      : "Codex with ChatGPT";
+      : "OMP with ChatGPT";
     const tunnelState = workspace ? readTunnelState(workspace.id) : null;
     const namedReady = tunnelState ? isNamedTunnelReady(tunnelState) : false;
     let namedRepair: { needed: boolean; userMessage?: string } = { needed: false };

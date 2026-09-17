@@ -12,12 +12,12 @@ export function getStateDir(): string {
   const home = os.homedir();
   switch (process.platform) {
     case "darwin":
-      return path.join(home, "Library", "Application Support", "codex-with-chatgpt");
+      return path.join(home, "Library", "Application Support", "omp-with-chatgpt");
     case "win32":
-      return path.join(process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"), "codex-with-chatgpt");
+      return path.join(process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"), "omp-with-chatgpt");
     default: {
       const base = process.env.XDG_STATE_HOME ?? path.join(home, ".local", "state");
-      return path.join(base, "codex-with-chatgpt");
+      return path.join(base, "omp-with-chatgpt");
     }
   }
 }
