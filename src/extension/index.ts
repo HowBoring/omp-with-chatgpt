@@ -17,6 +17,8 @@ import {
   type CheckpointPatch,
   type C2CTask,
 } from "./task-state.js";
+import { stopGateVerdict, toolGateVerdict } from "./gates.js";
+
 
 /** Transcript custom-entry type for the checkpoint mirror (issue #5). */
 export const CHECKPOINT_MIRROR_TYPE = "com.omp-with-chatgpt.c2c.checkpoint";
@@ -30,10 +32,7 @@ interface CommandContext {
 interface MinimalExtensionApi {
   setLabel(label: string): void;
   appendEntry?(customType: string, data: unknown): void;
-  on?(
-    event: "session_start",
-    handler: (event: unknown, ctx: CommandContext) => Promise<void> | void
-  ): void;
+  on?(event: string, handler: (event: unknown, ctx: CommandContext) => unknown): void;
   registerCommand(
     name: string,
     options: {
@@ -248,6 +247,34 @@ export default function ompWithChatGPT(pi: MinimalExtensionApi): void {
       if (lines.length > 0) ctx.ui.notify(lines.join("\n"), "info");
     } catch {
       // Restore is advisory; never break session start.
+    }
+  });
+
+  // Normal-path protocol gates (issue #7): while the owning session awaits
+  // a ChatGPT PLAN or REVIEW, modifying tools are blocked pre-execution;
+  // while awaiting REVIEW, the session may not finish the task as complete.
+  pi.on?.("tool_call", (event, ctx) => {
+    try {
+      const toolName: unknown =
+        event && typeof event === "object" && "toolName" in event ? event.toolName : undefined;
+      if (typeof toolName !== "string") return undefined;
+      const workspace = new Workspace(ctx.cwd);
+      const verdict = toolGateVerdict(readTask(workspace.id), ctx.sessionManager.getSessionId(), toolName);
+      if (!verdict.blocked) return undefined;
+      return { block: true, reason: verdict.reason };
+    } catch {
+      return undefined;
+    }
+  });
+
+  pi.on?.("session_stop", (_event, ctx) => {
+    try {
+      const workspace = new Workspace(ctx.cwd);
+      const verdict = stopGateVerdict(readTask(workspace.id), ctx.sessionManager.getSessionId());
+      if (!verdict.blocked) return undefined;
+      return { decision: "block", reason: verdict.reason };
+    } catch {
+      return undefined;
     }
   });
 
