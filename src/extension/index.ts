@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { getStateDir } from "../config/paths.js";
 import { readSession, sessionFile, type SavedSession } from "../session/state.js";
 import { PRODUCT_NAME, VERSION } from "../version.js";
@@ -26,7 +27,30 @@ export const CHECKPOINT_MIRROR_TYPE = "com.omp-with-chatgpt.c2c.checkpoint";
 interface CommandContext {
   ui: { notify(message: string, level?: string): void };
   cwd: string;
-  sessionManager: { getSessionId(): string; getBranch?(): unknown[] };
+  sessionManager: {
+    getSessionId(): string;
+    getBranch?(): unknown[];
+    getSessionFile?(): string | null;
+  };
+}
+
+/**
+ * Main-session vs subagent distinction (issue #8), verified against real
+ * OMP 18.2.4: a main session file is `<timestamp>_<sessionId>.jsonl` (the
+ * basename contains the session id); a subagent session file is
+ * `<main-file-stem>/<AgentName>.jsonl` (basename does NOT contain the
+ * subagent's id) and its header carries `parentSession`. Sessions without
+ * a persisted file (in-memory print runs) cannot be proven to be
+ * subagents and are treated as main.
+ */
+export function isSubagentSession(ctx: CommandContext): boolean {
+  try {
+    const file = ctx.sessionManager.getSessionFile?.();
+    if (!file) return false;
+    return !path.basename(file).includes(ctx.sessionManager.getSessionId());
+  } catch {
+    return false;
+  }
 }
 
 interface MinimalExtensionApi {
@@ -288,6 +312,11 @@ export default function ompWithChatGPT(pi: MinimalExtensionApi): void {
   pi.registerCommand("c2c-enable", {
     description: "Enable C2C for one goal; creates the workspace's single active task owned by this session",
     handler: async (args, ctx) => {
+      if (isSubagentSession(ctx)) {
+        throw new Error(
+          "subagent sessions cannot enable C2C tasks; the top-level task belongs to the main session (issue #8)"
+        );
+      }
       const workspace = openWorkspace(ctx.cwd);
       const task = enableTask(workspace.id, args, callerSessionId(ctx));
       mirrorTask(pi, task);
@@ -325,6 +354,11 @@ export default function ompWithChatGPT(pi: MinimalExtensionApi): void {
     description:
       "Take ownership of the active C2C task (explicit user command; use after the owning session has exited)",
     handler: async (_args, ctx) => {
+      if (isSubagentSession(ctx)) {
+        throw new Error(
+          "subagent sessions cannot take over C2C tasks; the top-level task belongs to the main session (issue #8)"
+        );
+      }
       const workspace = openWorkspace(ctx.cwd);
       const task = takeoverTask(workspace.id, callerSessionId(ctx));
       mirrorTask(pi, task);
