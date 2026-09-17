@@ -245,9 +245,9 @@ describe("c2c task commands under a real OMP process", () => {
     expect(run.results).toContain("OK c2c-finish");
     expect(readTask(wid)?.outcome).toBe("blocked");
 
-    // 7. The real extension registered exactly the five commands.
+    // 7. The real extension registered exactly the six commands.
     expect(run.results.find((r) => r.startsWith("COMMANDS "))).toBe(
-      "COMMANDS c2c-cancel,c2c-enable,c2c-finish,c2c-status,c2c-takeover"
+      "COMMANDS c2c-cancel,c2c-checkpoint,c2c-enable,c2c-finish,c2c-status,c2c-takeover"
     );
   });
 

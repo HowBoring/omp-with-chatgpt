@@ -8,18 +8,32 @@ import {
   enableTask,
   finishTask,
   formatTaskSummary,
+  mirrorOf,
   readTask,
+  reconcileMirror,
   takeoverTask,
+  updateCheckpoint,
+  type CheckpointMirror,
+  type CheckpointPatch,
+  type C2CTask,
 } from "./task-state.js";
+
+/** Transcript custom-entry type for the checkpoint mirror (issue #5). */
+export const CHECKPOINT_MIRROR_TYPE = "com.omp-with-chatgpt.c2c.checkpoint";
 
 interface CommandContext {
   ui: { notify(message: string, level?: string): void };
   cwd: string;
-  sessionManager: { getSessionId(): string };
+  sessionManager: { getSessionId(): string; getBranch?(): unknown[] };
 }
 
 interface MinimalExtensionApi {
   setLabel(label: string): void;
+  appendEntry?(customType: string, data: unknown): void;
+  on?(
+    event: "session_start",
+    handler: (event: unknown, ctx: CommandContext) => Promise<void> | void
+  ): void;
   registerCommand(
     name: string,
     options: {
@@ -27,6 +41,58 @@ interface MinimalExtensionApi {
       handler: (args: string, ctx: CommandContext) => Promise<void> | void;
     }
   ): void;
+}
+
+/** Best-effort transcript mirror; the workspace task file stays authoritative. */
+function mirrorTask(pi: MinimalExtensionApi, task: C2CTask): void {
+  try {
+    pi.appendEntry?.(CHECKPOINT_MIRROR_TYPE, mirrorOf(task));
+  } catch {
+    // Mirror failures never block the authoritative workspace write.
+  }
+}
+
+/** Latest checkpoint mirror from the current transcript branch, if any. */
+export function latestMirror(ctx: CommandContext): CheckpointMirror | null {
+  let branch: unknown[];
+  try {
+    branch = ctx.sessionManager.getBranch?.() ?? [];
+  } catch {
+    return null;
+  }
+  let latest: CheckpointMirror | null = null;
+  for (const entry of branch) {
+    const record = entry as { type?: unknown; customType?: unknown; data?: unknown };
+    if (record?.type === "custom" && record.customType === CHECKPOINT_MIRROR_TYPE) {
+      latest = record.data as CheckpointMirror;
+    }
+  }
+  return latest;
+}
+
+/**
+ * Parse `/c2c-checkpoint` key=value args into a CheckpointPatch.
+ * Keys: state, waiting, iter, chat, project, mode, connector.
+ */
+export function parseCheckpointArgs(args: string): CheckpointPatch {
+  const patch: CheckpointPatch = {};
+  const binding: NonNullable<CheckpointPatch["binding"]> = {};
+  for (const pair of args.trim().split(/\s+/)) {
+    if (!pair) continue;
+    const eq = pair.indexOf("=");
+    if (eq <= 0) continue;
+    const key = pair.slice(0, eq).toLowerCase();
+    const value = pair.slice(eq + 1);
+    if (key === "state") patch.protocolState = value as CheckpointPatch["protocolState"];
+    else if (key === "waiting") patch.waitingFor = value as CheckpointPatch["waitingFor"];
+    else if (key === "iter") patch.iteration = Number(value);
+    else if (key === "chat") binding.chatUrl = value;
+    else if (key === "project") binding.projectUrl = value;
+    else if (key === "mode") binding.mode = value as "long-chat" | "project";
+    else if (key === "connector") binding.connectorName = value;
+  }
+  if (Object.keys(binding).length > 0) patch.binding = binding;
+  return patch;
 }
 
 /**
@@ -88,6 +154,14 @@ function callerSessionId(ctx: CommandContext): string {
   return id;
 }
 
+function viewerOrUndefined(ctx: CommandContext): string | undefined {
+  try {
+    return callerSessionId(ctx);
+  } catch {
+    return undefined;
+  }
+}
+
 export function buildStatusMessage(cwd: string, viewerSessionId?: string): string {
   let workspaceRoot = cwd;
   let workspaceId: string | null = null;
@@ -100,6 +174,7 @@ export function buildStatusMessage(cwd: string, viewerSessionId?: string): strin
   }
   let summary: string;
   let taskSummary = "none (no C2C task for this workspace; use /c2c-enable <goal>)";
+  let bindingLine: string | null = null;
   if (!workspaceId) {
     summary = "no state (no session file for this workspace)";
   } else {
@@ -119,7 +194,16 @@ export function buildStatusMessage(cwd: string, viewerSessionId?: string): strin
     }
     summary = formatStateSummary(session, fileExists);
     try {
-      taskSummary = formatTaskSummary(readTask(workspaceId), viewerSessionId);
+      const task = readTask(workspaceId);
+      taskSummary = formatTaskSummary(task, viewerSessionId);
+      if (task?.binding && Object.keys(task.binding).length > 0) {
+        const parts: string[] = [];
+        if (task.binding.mode) parts.push(`mode=${task.binding.mode}`);
+        if (task.binding.chatUrl) parts.push(`chat=${task.binding.chatUrl}`);
+        if (task.binding.projectUrl) parts.push(`project=${task.binding.projectUrl}`);
+        if (task.binding.connectorName) parts.push(`connector=${task.binding.connectorName}`);
+        bindingLine = parts.join(" ");
+      }
     } catch {
       taskSummary = "unreadable (task file present but could not be parsed)";
     }
@@ -129,23 +213,48 @@ export function buildStatusMessage(cwd: string, viewerSessionId?: string): strin
     `workspace=${workspaceRoot}\n` +
     `stateDir=${getStateDir()}\n` +
     `state=${summary}\n` +
-    `task=${taskSummary}`
+    `task=${taskSummary}` +
+    (bindingLine ? `\nbinding=${bindingLine}` : "")
   );
 }
 
 export default function ompWithChatGPT(pi: MinimalExtensionApi): void {
   pi.setLabel(PRODUCT_NAME);
 
+  pi.on?.("session_start", (_event, ctx) => {
+    // Passive restore (issue #5): reconcile the workspace task file with
+    // the transcript mirror and report. Never writes workspace state from
+    // the mirror and never sends external messages.
+    try {
+      const workspace = new Workspace(ctx.cwd);
+      const result = reconcileMirror(readTask(workspace.id), latestMirror(ctx));
+      if (!result.authoritative && !result.mirror) return;
+      const lines: string[] = [];
+      if (result.authoritative) {
+        lines.push(
+          `restored C2C task state: ${formatTaskSummary(result.authoritative, viewerOrUndefined(ctx))}`
+        );
+      }
+      if (result.mirrorStale && result.mirror) {
+        lines.push(
+          `stale transcript mirror ignored: task ${result.mirror.taskId} rev=${result.mirror.revision} is older than the workspace record`
+        );
+      }
+      if (result.mirrorOrphaned && result.mirror) {
+        lines.push(
+          `transcript mirror for task ${result.mirror.taskId} has no workspace task file; informational only, no state changed`
+        );
+      }
+      if (lines.length > 0) ctx.ui.notify(lines.join("\n"), "info");
+    } catch {
+      // Restore is advisory; never break session start.
+    }
+  });
+
   pi.registerCommand("c2c-status", {
     description: "Show OMP C2C status: workspace, version, state location, and active task",
     handler: async (_args, ctx) => {
-      let viewer: string | undefined;
-      try {
-        viewer = callerSessionId(ctx);
-      } catch {
-        viewer = undefined;
-      }
-      ctx.ui.notify(buildStatusMessage(ctx.cwd, viewer), "info");
+      ctx.ui.notify(buildStatusMessage(ctx.cwd, viewerOrUndefined(ctx)), "info");
     },
   });
 
@@ -154,6 +263,7 @@ export default function ompWithChatGPT(pi: MinimalExtensionApi): void {
     handler: async (args, ctx) => {
       const workspace = openWorkspace(ctx.cwd);
       const task = enableTask(workspace.id, args, callerSessionId(ctx));
+      mirrorTask(pi, task);
       ctx.ui.notify(
         `enabled C2C task ${task.taskId} (owner session ${task.ownerSessionId})\ngoal="${task.goal}"`,
         "info"
@@ -167,6 +277,7 @@ export default function ompWithChatGPT(pi: MinimalExtensionApi): void {
       const workspace = openWorkspace(ctx.cwd);
       const note = args.trim() === "" ? undefined : args.trim();
       const task = cancelTask(workspace.id, callerSessionId(ctx), note);
+      mirrorTask(pi, task);
       ctx.ui.notify(`cancelled C2C task ${task.taskId} (outcome=cancelled, not DONE)`, "info");
     },
   });
@@ -178,6 +289,7 @@ export default function ompWithChatGPT(pi: MinimalExtensionApi): void {
       const workspace = openWorkspace(ctx.cwd);
       const { outcome, note } = parseFinishArgs(args);
       const task = finishTask(workspace.id, callerSessionId(ctx), outcome, note);
+      mirrorTask(pi, task);
       ctx.ui.notify(`closed C2C task ${task.taskId} (outcome=${task.outcome})`, "info");
     },
   });
@@ -188,8 +300,28 @@ export default function ompWithChatGPT(pi: MinimalExtensionApi): void {
     handler: async (_args, ctx) => {
       const workspace = openWorkspace(ctx.cwd);
       const task = takeoverTask(workspace.id, callerSessionId(ctx));
+      mirrorTask(pi, task);
       ctx.ui.notify(
         `session ${task.ownerSessionId} now owns C2C task ${task.taskId}\ngoal="${task.goal}"`,
+        "info"
+      );
+    },
+  });
+
+  pi.registerCommand("c2c-checkpoint", {
+    description:
+      "Advance the protocol checkpoint of the active task (owner only). Args: state=INIT|PLAN_RECEIVED|EXECUTING|EXECUTED_LOCAL|EXECUTED_SENT|DONE|BLOCKED waiting=none|GPT_PLAN|GPT_REVIEW|USER iter=N chat=<url> project=<url> mode=long-chat|project connector=<name>",
+    handler: async (args, ctx) => {
+      const workspace = openWorkspace(ctx.cwd);
+      const current = readTask(workspace.id);
+      if (!current) {
+        throw new Error("no C2C task for this workspace; use /c2c-enable <goal> first");
+      }
+      const patch = parseCheckpointArgs(args);
+      const task = updateCheckpoint(workspace.id, callerSessionId(ctx), current.revision, patch);
+      mirrorTask(pi, task);
+      ctx.ui.notify(
+        `checkpoint ${task.checkpoint?.protocolState ?? "unchanged"} (task ${task.taskId}, rev=${task.revision}, iter=${task.iteration})`,
         "info"
       );
     },

@@ -91,7 +91,7 @@ describe("buildStatusMessage", () => {
 });
 
 describe("extension registration surface", () => {
-  it("registers the five c2c task commands and no prompt hooks", () => {
+  it("registers the c2c commands and only the passive session_start restore hook", () => {
     const calls: string[] = [];
     const pi = {
       setLabel: (_label: string) => {
@@ -100,8 +100,8 @@ describe("extension registration surface", () => {
       registerCommand: (name: string, _opts: unknown) => {
         calls.push(`registerCommand:${name}`);
       },
-      on: (..._args: unknown[]) => {
-        calls.push("on");
+      on: (event: string, ..._args: unknown[]) => {
+        calls.push(`on:${event}`);
       },
       registerTool: (..._args: unknown[]) => {
         calls.push("registerTool");
@@ -113,7 +113,10 @@ describe("extension registration surface", () => {
     expect(calls).toContain("registerCommand:c2c-cancel");
     expect(calls).toContain("registerCommand:c2c-finish");
     expect(calls).toContain("registerCommand:c2c-takeover");
-    expect(calls).not.toContain("on");
+    expect(calls).toContain("registerCommand:c2c-checkpoint");
+    // The only hook is the passive session_start restore (no prompt, input,
+    // turn, or tool interception).
+    expect(calls.filter((c) => c.startsWith("on:"))).toEqual(["on:session_start"]);
     expect(calls).not.toContain("registerTool");
   });
 });
