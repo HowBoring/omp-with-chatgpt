@@ -3,6 +3,10 @@
 > ChatGPT thinks. OMP works.
 > ChatGPT 负责思考，OMP 负责干活。
 
+> [!NOTE]
+> **本项目 Port 自 [codex-with-chatgpt](https://github.com/XiaoDuoYa/codex-with-chatgpt)**:原项目以 Codex 为执行器;本仓库将其迁移为 OMP 专用产品,保留 C2C 协议、只读 MCP、OAuth、配对与 tunnel 等核心设计(见 `docs/adr/0001-omp-only-c2c-migration.md`)。
+> **This project is a port of [codex-with-chatgpt](https://github.com/XiaoDuoYa/codex-with-chatgpt)**: the original used Codex as the executor; this checkout migrates it into an OMP-only product while preserving the C2C protocol, read-only MCP, OAuth, pairing, and tunnel design (see `docs/adr/0001-omp-only-c2c-migration.md`).
+
 > [!IMPORTANT]
 > **遇到问题？** 请先向 OMP 发送 **「更新 OMP with ChatGPT」** 并重试。更新到最新版本可以解决大多数已知问题。
 > **Having trouble?** First ask OMP to **“Update OMP with ChatGPT”** and try again. Updating to the latest version resolves most known issues.
@@ -26,7 +30,7 @@ OAuth 保护的**只读** MCP 连接，按需读取当前工作区里它真正�
 
 **EN** — Use the ChatGPT web app as the planning and review brain for your
 OMP coding sessions, while OMP keeps full ownership of execution. Your
-workspacesitory is never uploaded: ChatGPT reads exactly the lines it needs through
+workspace is never uploaded: ChatGPT reads exactly the lines it needs through
 a secure, OAuth-protected, **read-only** MCP connection to your current
 workspace.
 
