@@ -4,7 +4,7 @@
 > ChatGPT 负责思考，OMP 负责干活。
 
 > [!NOTE]
-> **本项目 Port 自 [codex-with-chatgpt](https://github.com/XiaoDuoYa/codex-with-chatgpt)**:原项目以 Codex 为执行器;本仓库将其迁移为 OMP 专用产品,保留 C2C 协议、只读 MCP、OAuth、配对与 tunnel 等核心设计(见 `docs/adr/0001-omp-only-c2c-migration.md`)。
+> **本项目移植自 [codex-with-chatgpt](https://github.com/XiaoDuoYa/codex-with-chatgpt)**：原项目以 Codex 为执行器；本仓库将其迁移为 OMP 专用产品，保留 C2C 协议、只读 MCP、OAuth、配对与 tunnel 等核心设计（见 `docs/adr/0001-omp-only-c2c-migration.md`）。
 > **This project is a port of [codex-with-chatgpt](https://github.com/XiaoDuoYa/codex-with-chatgpt)**: the original used Codex as the executor; this checkout migrates it into an OMP-only product while preserving the C2C protocol, read-only MCP, OAuth, pairing, and tunnel design (see `docs/adr/0001-omp-only-c2c-migration.md`).
 
 > [!IMPORTANT]
@@ -14,7 +14,7 @@
 ## The problem · 解决什么问题
 
 **中文** — ChatGPT 付费订阅的网页版额度大量闲置，OMP 却在消耗紧张的
-模型额度做规划和 Review。本项目把"思考"交给你已付费的网页版 ChatGPT，
+模型额度做规划和审查。本项目把「思考」交给你已付费的网页版 ChatGPT，
 OMP 只负责执行。不用 API Key、不搞逆向代理——官方网页 + 只读 MCP 桥接。
 
 **EN** — ChatGPT Plus/Pro web quota sits idle while your coding agent burns
@@ -24,7 +24,7 @@ reverse proxy — official web UI plus a read-only MCP bridge.
 
 ## What it is · 这是什么
 
-**中文** — 把 ChatGPT 网页版变成 OMP 编码任务的"规划与审查大脑"，执行权
+**中文** — 把 ChatGPT 网页版变成 OMP 编码任务的「规划与审查大脑」，执行权
 完全保留在 OMP 手里。你的工作区永远不会被上传：ChatGPT 通过一条安全的、
 OAuth 保护的**只读** MCP 连接，按需读取当前工作区里它真正需要的那几行代码。
 
@@ -38,7 +38,7 @@ OMP integration ships as an **OMP plugin**: one checkout provides both the
 Extension (`/c2c-*` commands, task state, tool gates) and the Skill that
 drives the ChatGPT browser workflow.
 
-Detailed docs below are in English · 详细中文文档见 **[README.zh-CN.md](README.zh-CN.md)**
+下文详细文档为英文 · 完整中文文档见 **[README.zh-CN.md](README.zh-CN.md)**
 
 ## One-paste install · 一段话安装
 
@@ -92,11 +92,11 @@ Install and configure OMP with ChatGPT end-to-end. Do everything yourself:
 ## Install → Setup → Use (manual)
 
 1. Install the OMP plugin: run `omp plugin link <this checkout>`.
-2. Tell OMP: **"Set up OMP with ChatGPT."** (中文: "使用 OMP with ChatGPT 完成首次配置。")
+2. Tell OMP: **"Set up OMP with ChatGPT."**（中文：「使用 OMP with ChatGPT 完成首次配置。」）
 3. Use OMP normally: **"Use OMP with ChatGPT to implement XXX."**
 
 That's the whole manual. You don't need to know what MCP, OAuth, tunnels,
-ports or localhost are — OMP configures everything automatically and you
+ports, or localhost are — OMP configures everything automatically, and you
 just see:
 
 ```
@@ -162,10 +162,10 @@ Credentials stay in the OS app state directory, not in the project.
 The Skill checks GitHub once a day (`c2c update-check`). When a newer commit
 exists it reports availability — and, if any workspace has an **active C2C
 task**, the update is deferred (`deferred: true`) until the task finishes.
-Applying an update means `git pull && pnpm install && pnpm build` in the checkout plus a
-bridge restart; because the plugin is linked, the new Extension and Skill
-load on the **next OMP session** — an OMP reload/restart is required and is
-surfaced in the update output (`reloadRequired: true`).
+Applying an update means `git pull && pnpm install && pnpm build` in the
+checkout plus a bridge restart; because the plugin is linked, the new
+Extension and Skill load on the **next OMP session** — an OMP reload/restart
+is required and is surfaced in the update output (`reloadRequired: true`).
 
 ## State location
 
@@ -249,7 +249,7 @@ c2c status / doctor / pair / unpair / logs / stop
 c2c browser status  # dedicated-browser backend + verification
 ```
 
-Requirements: Node.js >= 20, git. `cloudflared` for the public connection
+Requirements: Node.js ≥ 20, git. `cloudflared` for the public connection
 (auto-detected; the Skill installs it for you). If QUIC is blocked, set
 `C2C_TUNNEL_PROTOCOL=http2` and restart the bridge.
 
