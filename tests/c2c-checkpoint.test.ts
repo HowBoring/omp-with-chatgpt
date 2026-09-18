@@ -90,10 +90,14 @@ describe("c2c task checkpoints", () => {
   it("checkpoint and binding persist identity, iteration, and chat/project binding", () => {
     const { id } = setup();
     const task = enableTask(id, "goal", "owner");
-    updateCheckpoint(id, "owner", task.revision, {
+    const planned = updateCheckpoint(id, "owner", task.revision, {
+      protocolState: "PLAN_RECEIVED",
+      iteration: 1,
+    });
+    updateCheckpoint(id, "owner", planned.revision, {
       protocolState: "EXECUTED_SENT",
       waitingFor: "GPT_REVIEW",
-      iteration: 3,
+      iteration: 1,
       binding: {
         mode: "project",
         chatUrl: "https://chatgpt.com/c/abc",
@@ -103,7 +107,7 @@ describe("c2c task checkpoints", () => {
     });
     const restored = readTask(id);
     expect(restored?.taskId).toBe(task.taskId);
-    expect(restored?.iteration).toBe(3);
+    expect(restored?.iteration).toBe(1);
     expect(restored?.checkpoint?.protocolState).toBe("EXECUTED_SENT");
     expect(restored?.checkpoint?.waitingFor).toBe("GPT_REVIEW");
     expect(restored?.binding?.projectUrl).toBe("https://chatgpt.com/g/g-p-xyz/project");

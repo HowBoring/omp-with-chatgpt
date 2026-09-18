@@ -1,6 +1,8 @@
 # C2C Agent Protocol
 
-Control plane: Computer Use (tiny structured messages typed into the ChatGPT UI).
+Control plane: the OMP Extension drives the dedicated C2C browser over CDP
+(tiny structured messages typed into the ChatGPT UI; see
+skills/omp-with-chatgpt/SKILL.md §8).
 Data plane: MCP (ChatGPT pulls files, diffs, search results itself).
 
 Never mix the two: control messages carry state, never content.
@@ -265,7 +267,7 @@ Read code, git, diffs, and any released command output through that
 connector. Never ask anyone to paste file bodies, diffs, or logs. After
 EXECUTED, call execution_output (list, then read) when a readable item
 exists; if status is restricted, review from git instead. Never upload
-the repo into this Project's files or sources.
+the workspace files into this Project's files or sources.
 
 When facts conflict, trust this order:
 1. Current code from the connector

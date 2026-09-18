@@ -36,6 +36,9 @@ function writeHarness(opts: {
   dumpMirror: boolean;
 }): string {
   const extPath = path.join(projectRoot, "src/extension/index.ts").replace(/\\/g, "/");
+  const wsPath = path.join(projectRoot, "src/workspace/manager.ts").replace(/\\/g, "/");
+  const tsPath = path.join(projectRoot, "src/extension/task-state.ts").replace(/\\/g, "/");
+  const recPath = path.join(projectRoot, "src/execution/records.ts").replace(/\\/g, "/");
   const harness = path.join(opts.dir, `${opts.name}.ts`);
   const mirrorLines = opts.dumpMirror
     ? [
@@ -70,6 +73,22 @@ function writeHarness(opts: {
     "    for (const pair of script) {",
     "      const cmd = pair[0];",
     "      const args = pair[1];",
+    // "__record <n>" appends an execution record for the current task so the
+    // EXECUTED_SENT evidence check (issue #6) can pass in a scripted probe.
+    '      if (cmd === "__record") {',
+    "        try {",
+    `          const { Workspace } = await import(${JSON.stringify(wsPath)});`,
+    `          const { readTask } = await import(${JSON.stringify(tsPath)});`,
+    `          const { appendExecutionRecord } = await import(${JSON.stringify(recPath)});`,
+    "          const ws = new Workspace(fakeCtx.cwd);",
+    "          const t = readTask(ws.id);",
+    '          appendExecutionRecord(ws.id, { taskId: t.taskId, iteration: Number(args), changedFiles: ["probe.ts"], tests: null, exitStatus: "ok", timestamp: new Date().toISOString() });',
+    '          results.push("OK __record");',
+    "        } catch (e) {",
+    '          results.push("ERROR __record " + String(e && e.message ? e.message : e));',
+    "        }",
+    "        continue;",
+    "      }",
     "      const handler = registry[cmd];",
     '      if (!handler) { results.push("MISSING " + cmd); continue; }',
     "      try {",
@@ -152,8 +171,12 @@ describe("c2c checkpoint restore under a real OMP process", () => {
         ["c2c-enable", "restore me"],
         [
           "c2c-checkpoint",
-          "state=EXECUTED_SENT waiting=GPT_REVIEW iter=3 mode=project project=https://chatgpt.com/g/g-p-xyz/project chat=https://chatgpt.com/c/abc connector=OMP-Test",
+          "state=PLAN_RECEIVED waiting=none iter=1 mode=project project=https://chatgpt.com/g/g-p-xyz/project chat=https://chatgpt.com/c/abc connector=OMP-Test",
         ],
+        // Evidence check (issue #6): EXECUTED without a matching record is rejected.
+        ["c2c-checkpoint", "state=EXECUTED_SENT waiting=GPT_REVIEW iter=1"],
+        ["__record", "1"],
+        ["c2c-checkpoint", "state=EXECUTED_SENT waiting=GPT_REVIEW iter=1"],
       ],
       hook: "agent_end",
       dumpMirror: false,
@@ -169,12 +192,15 @@ describe("c2c checkpoint restore under a real OMP process", () => {
     expect(run1.status).toBe(0);
     expect(run1.results).toContain("OK c2c-enable");
     expect(run1.results).toContain("OK c2c-checkpoint");
+    expect(run1.results).toContain("OK __record");
+    const rejected = run1.results.find((r) => r.startsWith("ERROR c2c-checkpoint"));
+    expect(rejected).toContain("no execution record");
     const sid1 = (run1.results.find((r) => r.startsWith("REAL_SID ")) ?? "").slice(9);
     expect(sid1).not.toBe("");
 
     const task = readTask(wid);
     expect(task?.checkpoint?.protocolState).toBe("EXECUTED_SENT");
-    expect(task?.iteration).toBe(3);
+    expect(task?.iteration).toBe(1);
     expect(task?.binding?.projectUrl).toBe("https://chatgpt.com/g/g-p-xyz/project");
 
     // Run 2: resume the same session with a slash-only print command (no
@@ -210,7 +236,7 @@ describe("c2c checkpoint restore under a real OMP process", () => {
     };
     expect(mirror.taskId).toBe(task?.taskId);
     expect(mirror.revision).toBe(task?.revision);
-    expect(mirror.iteration).toBe(3);
+    expect(mirror.iteration).toBe(1);
     expect(mirror.checkpoint?.protocolState).toBe("EXECUTED_SENT");
     expect(mirror.checkpoint?.waitingFor).toBe("GPT_REVIEW");
     expect(mirror.binding?.mode).toBe("project");

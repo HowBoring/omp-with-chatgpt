@@ -20,13 +20,13 @@ reverse proxy — official web UI plus a read-only MCP bridge.
 
 ## What it is · 这是什么
 
-**中文** — 把 ChatGPT 网页版变成 OMP 编码会话的"规划与审查大脑"，执行权
-完全保留在 OMP 手里。你的仓库永远不会被上传：ChatGPT 通过一条安全的、
+**中文** — 把 ChatGPT 网页版变成 OMP 编码任务的"规划与审查大脑"，执行权
+完全保留在 OMP 手里。你的工作区永远不会被上传：ChatGPT 通过一条安全的、
 OAuth 保护的**只读** MCP 连接，按需读取当前工作区里它真正需要的那几行代码。
 
 **EN** — Use the ChatGPT web app as the planning and review brain for your
 OMP coding sessions, while OMP keeps full ownership of execution. Your
-repository is never uploaded: ChatGPT reads exactly the lines it needs through
+workspacesitory is never uploaded: ChatGPT reads exactly the lines it needs through
 a secure, OAuth-protected, **read-only** MCP connection to your current
 workspace.
 
@@ -49,7 +49,7 @@ Detailed docs below are in English · 详细中文文档见 **[README.zh-CN.md](
    （macOS 用 Homebrew，Windows 用 winget），同时安装 cloudflared。
 2. 下载：把 https://github.com/HowBoring/omp-with-chatgpt 克隆到
    ~/omp-with-chatgpt（已存在就 git pull 更新）。
-3. 构建：在该目录里执行 corepack pnpm install。
+3. 构建：在该目录里执行 corepack pnpm install && corepack pnpm build。
 4. 安装插件：在该目录里执行 omp plugin link "$PWD"（Extension 与
    skills/omp-with-chatgpt/SKILL.md 会一起被 OMP 发现，无需复制文件）。
 5. 首次配置：按 SKILL.md 里的 first-time setup 流程执行
@@ -71,7 +71,7 @@ Install and configure OMP with ChatGPT end-to-end. Do everything yourself:
    plus cloudflared.
 2. Download: clone https://github.com/HowBoring/omp-with-chatgpt into
    ~/omp-with-chatgpt (if it already exists, git pull to update).
-3. Build: inside that folder run `corepack pnpm install`.
+3. Build: inside that folder run `corepack pnpm install && corepack pnpm build`.
 4. Install the plugin: inside that folder run `omp plugin link "$PWD"`
    (the Extension and skills/omp-with-chatgpt/SKILL.md are discovered
    together; no files to copy).
@@ -158,7 +158,7 @@ Credentials stay in the OS app state directory, not in the project.
 The Skill checks GitHub once a day (`c2c update-check`). When a newer commit
 exists it reports availability — and, if any workspace has an **active C2C
 task**, the update is deferred (`deferred: true`) until the task finishes.
-Applying an update means `git pull && pnpm install` in the checkout plus a
+Applying an update means `git pull && pnpm install && pnpm build` in the checkout plus a
 bridge restart; because the plugin is linked, the new Extension and Skill
 load on the **next OMP session** — an OMP reload/restart is required and is
 surfaced in the update output (`reloadRequired: true`).

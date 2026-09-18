@@ -27,6 +27,9 @@ function writeHarness(opts: {
   setupScript: Array<[string, string]>;
 }): string {
   const extPath = path.join(projectRoot, "src/extension/index.ts").replace(/\\/g, "/");
+  const wsPath = path.join(projectRoot, "src/workspace/manager.ts").replace(/\\/g, "/");
+  const tsPath = path.join(projectRoot, "src/extension/task-state.ts").replace(/\\/g, "/");
+  const recPath = path.join(projectRoot, "src/execution/records.ts").replace(/\\/g, "/");
   const harness = path.join(opts.dir, `${opts.name}.ts`);
   // session_stop is captured, not forwarded: a real block verdict re-enters
   // the session indefinitely by design (operator interrupt is the escape),
@@ -63,6 +66,20 @@ function writeHarness(opts: {
     "    };",
     `    const script = ${JSON.stringify(opts.setupScript)};`,
     "    for (const pair of script) {",
+    // "__record <n>" appends an execution record for the current task so the
+    // EXECUTED_SENT evidence check (issue #6) can pass in a scripted probe.
+    '      if (pair[0] === "__record") {',
+    "        try {",
+    `          const { Workspace } = await import(${JSON.stringify(wsPath)});`,
+    `          const { readTask } = await import(${JSON.stringify(tsPath)});`,
+    `          const { appendExecutionRecord } = await import(${JSON.stringify(recPath)});`,
+    "          const ws = new Workspace(fakeCtx.cwd);",
+    "          const t = readTask(ws.id);",
+    '          appendExecutionRecord(ws.id, { taskId: t.taskId, iteration: Number(pair[1]), changedFiles: ["probe.ts"], tests: null, exitStatus: "ok", timestamp: new Date().toISOString() });',
+    "          results.push('OK __record');",
+    "        } catch (e) { results.push('ERROR __record ' + String(e && e.message ? e.message : e)); }",
+    "        continue;",
+    "      }",
     "      try { await registry[pair[0]](pair[1], fakeCtx); results.push('OK ' + pair[0]); }",
     "      catch (e) { results.push('ERROR ' + pair[0] + ' ' + String(e && e.message ? e.message : e).split(NL).join(' | ')); }",
     "    }",
@@ -174,6 +191,8 @@ describe("protocol gates under a real OMP process", () => {
       name: "gate-review",
       setupScript: [
         ["c2c-enable", "review task"],
+        ["c2c-checkpoint", "state=PLAN_RECEIVED waiting=none iter=1"],
+        ["__record", "1"],
         ["c2c-checkpoint", "state=EXECUTED_SENT waiting=GPT_REVIEW iter=1"],
       ],
     });

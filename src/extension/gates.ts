@@ -24,10 +24,12 @@ export const GATED_TOOLS: readonly string[] = [
 export type GateVerdict = { blocked: true; reason: string } | { blocked: false };
 
 /**
- * Gate decision for one tool call. Blocks only when the caller owns an
- * active task whose checkpoint is waiting on ChatGPT (PLAN or REVIEW).
- * Non-owner sessions, closed/absent tasks, non-gated tools, and non-gated
- * states pass through untouched.
+ * Gate decision for one tool call. While an active task's checkpoint waits on
+ * a ChatGPT PLAN or REVIEW, modifying tools are blocked for EVERY session in
+ * the workspace — the owner, its subagents (whose work belongs to the owning
+ * task, issue #8), and any other session. Review must complete before new
+ * edits land. Closed/absent tasks, non-gated tools, and non-waiting states
+ * pass through untouched.
  */
 export function toolGateVerdict(
   task: C2CTask | null,
@@ -36,7 +38,6 @@ export function toolGateVerdict(
 ): GateVerdict {
   if (!GATED_TOOLS.includes(toolName)) return { blocked: false };
   if (!task || task.state !== "active") return { blocked: false };
-  if (task.ownerSessionId !== callerSessionId) return { blocked: false };
   const waiting = task.checkpoint?.waitingFor;
   if (waiting === "GPT_PLAN") {
     return {

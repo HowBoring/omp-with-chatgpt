@@ -125,3 +125,49 @@ describe("extension registration surface", () => {
     expect(calls).not.toContain("registerTool");
   });
 });
+
+describe("parseCheckpointArgs", () => {
+  it("parses free-text next/issues keys and structured keys", async () => {
+    const { parseCheckpointArgs } = await import("../src/extension/index.js");
+    const patch = parseCheckpointArgs(
+      "state=BLOCKED waiting=USER iter=2 issues=tests fail; needs decision next=wait for the user"
+    );
+    expect(patch.protocolState).toBe("BLOCKED");
+    expect(patch.waitingFor).toBe("USER");
+    expect(patch.iteration).toBe(2);
+    expect(patch.issues).toEqual(["tests fail", "needs decision"]);
+    expect(patch.nextStep).toBe("wait for the user");
+  });
+});
+
+describe("checkpoint iteration binding", () => {
+  it("rejects PLAN that does not start the next iteration and EXECUTED for another iteration", async () => {
+    const { enableTask, updateCheckpoint, TaskError } = await import("../src/extension/task-state.js");
+    const { isolateStateDir, makeTmpDir, cleanup } = await import("./helpers.js");
+    const stateDir = isolateStateDir();
+    const workspaceDir = makeTmpDir("c2c-iter-bind");
+    try {
+      const { Workspace } = await import("../src/workspace/manager.js");
+      const id = new Workspace(workspaceDir).id;
+      const task = enableTask(id, "goal", "owner");
+      expect(() =>
+        updateCheckpoint(id, "owner", task.revision, { protocolState: "PLAN_RECEIVED", iteration: 5 })
+      ).toThrow(TaskError);
+      const planned = updateCheckpoint(id, "owner", task.revision, {
+        protocolState: "PLAN_RECEIVED",
+        iteration: 1,
+      });
+      expect(planned.iteration).toBe(1);
+      expect(() =>
+        updateCheckpoint(id, "owner", planned.revision, {
+          protocolState: "EXECUTED_LOCAL",
+          iteration: 2,
+        })
+      ).toThrow(/EXECUTED must reference the current iteration 1/);
+    } finally {
+      cleanup(stateDir);
+      cleanup(workspaceDir);
+      delete process.env.C2C_STATE_DIR;
+    }
+  });
+});

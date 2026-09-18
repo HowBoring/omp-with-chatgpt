@@ -7,6 +7,7 @@ import { startBridge } from "../bridge/server.js";
 import { findBridgeObservation, findLiveBridge, type RuntimeState } from "../bridge/runtime.js";
 import { adminFetch, ensureBridge, stopBridge } from "../process/daemon.js";
 import { Workspace } from "../workspace/manager.js";
+import { countActiveTasks } from "../extension/task-state.js";
 import { AuthStore } from "../auth/store.js";
 import { detectTunnelBinaries } from "../tunnel/detect.js";
 import {
@@ -763,25 +764,6 @@ function runGit(args: string[]): { ok: boolean; stdout: string } {
   return { ok: result.status === 0, stdout: (result.stdout ?? "").trim() };
 }
 
-/** Any active C2C task in any workspace blocks applying an update (issue #14). */
-function activeC2CTaskCount(): number {
-  const dir = path.join(getStateDir(), "tasks");
-  let count = 0;
-  try {
-    for (const name of fs.readdirSync(dir)) {
-      if (!name.endsWith(".json")) continue;
-      try {
-        const task = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")) as { state?: string };
-        if (task.state === "active") count += 1;
-      } catch {
-        // unreadable task file: not evidence of an active task
-      }
-    }
-  } catch {
-    // no tasks directory: no active tasks
-  }
-  return count;
-}
 
 acceptUnusedWorkspaceOption(
   program
@@ -810,7 +792,7 @@ acceptUnusedWorkspaceOption(
       // Deferral (issue #14): an available update is reported but must not be
       // applied while any workspace has an active C2C task. Applying it always
       // requires an OMP reload so the linked extension/skill reload.
-      const activeTasks = data.updateAvailable ? activeC2CTaskCount() : 0;
+      const activeTasks = data.updateAvailable ? countActiveTasks() : 0;
       const deferred = data.updateAvailable && activeTasks > 0;
       const payload = {
         ok: true,

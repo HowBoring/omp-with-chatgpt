@@ -225,7 +225,7 @@ exists):
 Inside the checkout directory (see Locations):
 
 1. `git pull --ff-only` (if it fails due to local edits: `git stash && git pull --ff-only`).
-2. `corepack pnpm install`.
+2. `corepack pnpm install && corepack pnpm build` (the CLI prefers `dist/` over source; without a build it keeps running stale code).
 3. `c2c restart -w <workspace>` so the bridge runs the new code, then
    `c2c update-check --force --json` to refresh the cache (should now report up to date).
    The extension and Skill update through the plugin link — no copy step.
@@ -379,8 +379,8 @@ and no Project stay **long-chat**. Do not ask those users to migrate. If they
 later say they want a Project, run **Bind Project**. A brand-new workspace
 (no session file) is **project**.
 
-Never match a Project or a chat by display name. Never upload the repo to
-Project sources. Never click 分享 / Share. Do not rename ChatGPT chats.
+Never match a Project or a chat by display name. Never upload workspace
+files to Project sources. Never click 分享 / Share. Do not rename ChatGPT chats.
 
 ### long-chat (do not rewrite this path)
 
@@ -599,12 +599,14 @@ Produce a C2C PLAN message.
    suggestions (which file, what to change, why). If the reply is a bare
    one-liner with no rationale or file-level guidance, ask once:
    "Please expand the plan with rationale and concrete per-file suggestions."
-   Then: `/c2c-checkpoint "state=PLAN_RECEIVED waiting=NONE next=execute PLAN"`
+   Then: `/c2c-checkpoint "state=PLAN_RECEIVED waiting=none next=execute PLAN"`
 5. Execute the plan yourself with your own tools and judgment; ChatGPT does
    not micro-manage tool calls. Subagents you spawn share your task — they
-   cannot enable or take over tasks, and that is correct.
+   cannot enable or take over tasks, and their modifying tools are gated
+   whenever the task awaits PLAN or REVIEW. That is correct: finish subagent
+   work before sending EXECUTED.
    Before you start:
-   `/c2c-checkpoint "state=EXECUTING waiting=NONE next=finish PLAN then record"`
+   `/c2c-checkpoint "state=EXECUTING waiting=none next=finish PLAN then record"`
 6. Record the execution so ChatGPT can read it via MCP. Metadata always:
    `c2c record -w <ws> --task c2c_f81a --iteration 1 --changed-files "src/a.ts,src/b.ts" --tests "27 passed" --exit-status ok`
    Records bind to the active task and iteration automatically; the task id
@@ -617,7 +619,7 @@ Produce a C2C PLAN message.
    keys, or unrelated dumps. Never paste that file (or any log) into ChatGPT.
    If the CLI says the output was not released, still send EXECUTED; ChatGPT
    reviews from git. Then:
-   `/c2c-checkpoint "state=EXECUTED_LOCAL waiting=NONE next=send EXECUTED" iter=<n>`
+   `/c2c-checkpoint "state=EXECUTED_LOCAL waiting=none iter=<n> next=send EXECUTED"`
 7. Send EXECUTED (no diffs, no logs). Tell ChatGPT to use MCP, including
    `execution_output` when a readable item exists:
 
@@ -641,21 +643,30 @@ If execution_output lists a readable item for this iteration, list then read it.
 If status is restricted, ignore it and review from git_diff.
 ```
 
-   Then: `/c2c-checkpoint "state=EXECUTED_SENT waiting=GPT_REVIEW iter=<n> next=wait for PLAN or DONE"`.
+   Then: `/c2c-checkpoint "state=EXECUTED_SENT waiting=GPT_REVIEW iter=<n> next=wait for review reply"`.
    From this point your modifying tools are gated until the review arrives —
    that is the extension enforcing "review before new edits", not an error.
 8. ChatGPT reviews via MCP (`git_diff`, `read_file`, `test_status`,
    `execution_output`) and replies DONE / PLAN (next iteration) / BLOCKED.
-   When the reply arrives: `/c2c-checkpoint "state=DONE waiting=none"` clears the
-   gate, then act on the reply.
-9. Loop. Respect maxIterations (`.c2c.json`, default 12). At the limit, pause and ask
+   Act on the reply that actually arrived — never mark DONE unconditionally:
+   - **DONE**: `/c2c-checkpoint "state=DONE waiting=none"` clears the gate,
+     then step 10.
+   - **Revised PLAN**: `/c2c-checkpoint "state=PLAN_RECEIVED waiting=none iter=<n+1> next=execute revised PLAN"`
+     (the extension requires PLAN to start exactly the next iteration), then
+     continue at step 5 with the new plan.
+   - **BLOCKED**: step 11.
+   In every case record what the reply decided in `next=` so a later session
+   can resume from `/c2c-status` alone.
+9. Loop. Respect maxIterations (`.c2c.json`, default 12). The extension rejects
+   a PLAN past the limit; pause and ask
    the user: "已完成 12 轮协作，仍有未解决问题，是否继续？"
 10. On DONE: summarize the result to the user in plain language.
     `/c2c-finish "<one-line outcome>"` (owner session only). The task closes;
     a new goal needs a new `/c2c-enable`.
 11. On BLOCKED: read ChatGPT's reason, fix what you can, or surface the single
     decision the user must make.
-    `/c2c-checkpoint "state=BLOCKED waiting=USER issues=<short reason>"`.
+    `/c2c-checkpoint "state=BLOCKED waiting=USER issues=<short reason>"`
+    (the reason is stored on the checkpoint and shown by `/c2c-status`).
 
 ## Workflow: disconnect（"断开 ChatGPT"）
 
@@ -745,7 +756,7 @@ the previous public address is gone. Doctor already started a new one.
 | Pairing code rejected/expired | `c2c pair --json` for a fresh code |
 | Same explicit ChatGPT setup/reconnect browser configuration step fails twice after repair | Stop automating ChatGPT settings and use **Guided manual ChatGPT setup fallback**. Do not count browser/js timeout, loading/generating, or login/2FA waiting as failures. |
 | Port conflict | handled automatically; never surface to the user |
-| Modifying tools blocked / cannot end session while waiting for review | The task checkpoint says `waiting=GPT_REVIEW`. Go read ChatGPT's reply (same tab), then `/c2c-checkpoint "state=DONE waiting=none"`. Do not `/c2c-cancel` just to escape the gate. |
+| Modifying tools blocked / cannot end session while waiting for review | The task checkpoint says `waiting=GPT_REVIEW`. Go read ChatGPT's reply (same tab), then record what the reply decided: DONE → `/c2c-checkpoint "state=DONE waiting=none"`; revised PLAN → `/c2c-checkpoint "state=PLAN_RECEIVED waiting=none iter=<n+1> next=execute revised PLAN"`; BLOCKED → `state=BLOCKED waiting=USER issues=<reason>`. Do not `/c2c-cancel` just to escape the gate. |
 | `/c2c-status` shows an active task owned by an exited session | Explicit user command only: `/c2c-takeover`. A wait timeout never proves the owner is gone. |
 | cloudflared missing | install it yourself (brew/winget), then retry |
 | Sidebar has no「项目」 | Ask the user to hover「聊天」, click the …, choose「按项目整理」 |

@@ -88,7 +88,7 @@ If cloudflared is installed in a custom location that is not on `PATH`, set
 Working as intended: the active C2C task's checkpoint says
 `waitingFor=GPT_REVIEW`, so the OMP extension gates modifying tools and
 `session_stop` until the review lands. Read ChatGPT's reply in the saved
-chat, then continue the protocol (`/c2c-checkpoint "state=DONE waiting=none"`).
+chat, then continue the protocol per the reply (DONE → `/c2c-checkpoint "state=DONE waiting=none"`; revised PLAN → `state=PLAN_RECEIVED waiting=none iter=<n+1>`; BLOCKED → `state=BLOCKED waiting=USER issues=<reason>`).
 Do not cancel the task to escape the gate.
 
 ### /c2c-status shows a task owned by an exited session

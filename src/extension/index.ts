@@ -4,6 +4,7 @@ import { getStateDir } from "../config/paths.js";
 import { readSession, sessionFile, type SavedSession } from "../session/state.js";
 import { PRODUCT_NAME, VERSION } from "../version.js";
 import { Workspace } from "../workspace/manager.js";
+import { validateExecutedEvidence } from "../execution/records.js";
 import {
   cancelTask,
   enableTask,
@@ -92,15 +93,27 @@ export function latestMirror(ctx: CommandContext): CheckpointMirror | null {
   }
   return latest;
 }
-
 /**
  * Parse `/c2c-checkpoint` key=value args into a CheckpointPatch.
- * Keys: state, waiting, iter, chat, project, mode, connector.
+ * Keys: state, waiting, iter, chat, project, mode, connector — plus the
+ * free-text keys `next` and `issues`, which consume the REST of the arg
+ * string (so they must come last). `issues` splits on ";".
  */
 export function parseCheckpointArgs(args: string): CheckpointPatch {
   const patch: CheckpointPatch = {};
   const binding: NonNullable<CheckpointPatch["binding"]> = {};
-  for (const pair of args.trim().split(/\s+/)) {
+  // Free-text keys consume the remainder; split them off first.
+  let rest = args.trim();
+  for (const freeKey of ["next", "issues"] as const) {
+    const m = rest.match(new RegExp(`(?:^|\\s)${freeKey}=(.*)$`));
+    if (m) {
+      const value = m[1].trim();
+      rest = rest.slice(0, m.index).trim();
+      if (freeKey === "next") patch.nextStep = value;
+      else patch.issues = value.split(";").map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  for (const pair of rest.split(/\s+/)) {
     if (!pair) continue;
     const eq = pair.indexOf("=");
     if (eq <= 0) continue;
@@ -371,7 +384,7 @@ export default function ompWithChatGPT(pi: MinimalExtensionApi): void {
 
   pi.registerCommand("c2c-checkpoint", {
     description:
-      "Advance the protocol checkpoint of the active task (owner only). Args: state=INIT|PLAN_RECEIVED|EXECUTING|EXECUTED_LOCAL|EXECUTED_SENT|DONE|BLOCKED waiting=none|GPT_PLAN|GPT_REVIEW|USER iter=N chat=<url> project=<url> mode=long-chat|project connector=<name>",
+      'Advance the protocol checkpoint of the active task (owner only). Args: state=INIT|PLAN_RECEIVED|EXECUTING|EXECUTED_LOCAL|EXECUTED_SENT|DONE|BLOCKED waiting=none|GPT_PLAN|GPT_REVIEW|USER iter=N next="<step>" issues="<a; b>" chat=<url> project=<url> mode=long-chat|project connector=<name>',
     handler: async (args, ctx) => {
       const workspace = openWorkspace(ctx.cwd);
       const current = readTask(workspace.id);
@@ -379,6 +392,29 @@ export default function ompWithChatGPT(pi: MinimalExtensionApi): void {
         throw new Error("no C2C task for this workspace; use /c2c-enable <goal> first");
       }
       const patch = parseCheckpointArgs(args);
+      // Iteration limit (.c2c.json maxIterations, default 12): a PLAN past the
+      // limit must pause for a user decision instead of advancing.
+      if (patch.protocolState === "PLAN_RECEIVED") {
+        const maxIterations = workspace.projectConfig.maxIterations ?? 12;
+        const nextIteration = patch.iteration ?? current.iteration + 1;
+        if (nextIteration > maxIterations) {
+          throw new Error(
+            `iteration limit reached (${maxIterations}); pause and ask the user whether to continue (e.g. "已完成 ${maxIterations} 轮协作，仍有未解决问题，是否继续？") before accepting another PLAN`
+          );
+        }
+      }
+      // EXECUTED-path evidence check (issue #6): a matching execution record
+      // for exactly this task and iteration must exist before EXECUTED goes out.
+      if (patch.protocolState === "EXECUTED_SENT") {
+        const evidence = validateExecutedEvidence(
+          workspace.id,
+          current.taskId,
+          patch.iteration ?? current.iteration
+        );
+        if (!evidence.ok) {
+          throw new Error(`cannot send EXECUTED: ${evidence.reason}`);
+        }
+      }
       const task = updateCheckpoint(workspace.id, callerSessionId(ctx), current.revision, patch);
       mirrorTask(pi, task);
       ctx.ui.notify(

@@ -62,6 +62,10 @@ export interface C2CTask {
   checkpoint?: {
     protocolState: ProtocolState;
     waitingFor: WaitingFor;
+    /** What the owner session does next (docs/protocol.md checkpoint contract). */
+    nextStep?: string;
+    /** Open issues or the BLOCKED reason. */
+    issues?: string[];
     updatedAt: string;
   };
   /** Chat/project binding for this task. */
@@ -201,6 +205,28 @@ export function readTask(workspaceId: string): C2CTask | null {
   } catch {
     return null;
   }
+}
+
+/** Number of workspaces with an active task (drives update deferral, issue #14). */
+export function countActiveTasks(): number {
+  const dir = path.join(getStateDir(), "tasks");
+  let count = 0;
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+      if (isTask(parsed) && parsed.state === "active") count += 1;
+    } catch {
+      // unreadable task file: not evidence of an active task
+    }
+  }
+  return count;
 }
 
 /** Atomic-ish persistence: write tmp + rename so readers never see a half write. */
@@ -354,6 +380,8 @@ export interface CheckpointPatch {
   protocolState?: ProtocolState;
   waitingFor?: WaitingFor;
   iteration?: number;
+  nextStep?: string;
+  issues?: string[];
   binding?: C2CTask["binding"];
 }
 
@@ -397,15 +425,52 @@ export function updateCheckpoint(
   if (patch.iteration !== undefined && (!Number.isInteger(patch.iteration) || patch.iteration < 0)) {
     throw new TaskError("INVALID_CHECKPOINT", "iteration must be a non-negative integer");
   }
+  // Iteration binding (issues #6/#12): a PLAN always starts exactly the next
+  // iteration of the same task; EXECUTED evidence must reference the current
+  // one. Arbitrary iteration jumps or replays are rejected.
+  if (
+    patch.protocolState === "PLAN_RECEIVED" &&
+    patch.iteration !== undefined &&
+    patch.iteration !== existing.iteration + 1
+  ) {
+    throw new TaskError(
+      "INVALID_CHECKPOINT",
+      `PLAN_RECEIVED must start iteration ${existing.iteration + 1} (task ${existing.taskId} is at iteration ${existing.iteration}), got ${patch.iteration}`
+    );
+  }
+  if (
+    (patch.protocolState === "EXECUTED_LOCAL" || patch.protocolState === "EXECUTED_SENT") &&
+    patch.iteration !== undefined &&
+    patch.iteration !== existing.iteration
+  ) {
+    throw new TaskError(
+      "INVALID_CHECKPOINT",
+      `EXECUTED must reference the current iteration ${existing.iteration} of task ${existing.taskId}, got ${patch.iteration}`
+    );
+  }
   const now = new Date().toISOString();
-  const checkpoint =
-    patch.protocolState !== undefined || patch.waitingFor !== undefined
-      ? {
-          protocolState: patch.protocolState ?? existing.checkpoint?.protocolState ?? "INIT",
-          waitingFor: patch.waitingFor ?? existing.checkpoint?.waitingFor ?? "none",
-          updatedAt: now,
-        }
-      : existing.checkpoint;
+  const touchesCheckpoint =
+    patch.protocolState !== undefined ||
+    patch.waitingFor !== undefined ||
+    patch.nextStep !== undefined ||
+    patch.issues !== undefined;
+  const checkpoint = touchesCheckpoint
+    ? {
+        protocolState: patch.protocolState ?? existing.checkpoint?.protocolState ?? "INIT",
+        waitingFor: patch.waitingFor ?? existing.checkpoint?.waitingFor ?? "none",
+        ...(patch.nextStep !== undefined
+          ? { nextStep: patch.nextStep }
+          : existing.checkpoint?.nextStep !== undefined
+            ? { nextStep: existing.checkpoint.nextStep }
+            : {}),
+        ...(patch.issues !== undefined
+          ? { issues: patch.issues }
+          : existing.checkpoint?.issues !== undefined
+            ? { issues: existing.checkpoint.issues }
+            : {}),
+        updatedAt: now,
+      }
+    : existing.checkpoint;
   return writeTaskAtomic(workspaceId, {
     ...existing,
     revision: existing.revision + 1,
@@ -424,9 +489,14 @@ export function formatTaskSummary(task: C2CTask | null, viewerSessionId?: string
   const checkpoint = task.checkpoint
     ? ` checkpoint=${task.checkpoint.protocolState}/waiting:${task.checkpoint.waitingFor}`
     : "";
+  const next = task.checkpoint?.nextStep ? ` next="${task.checkpoint.nextStep}"` : "";
+  const issues =
+    task.checkpoint?.issues && task.checkpoint.issues.length > 0
+      ? ` issues="${task.checkpoint.issues.join("; ")}"`
+      : "";
   const base =
     task.state === "active"
-      ? `active ${task.taskId} rev=${task.revision} iter=${task.iteration}${checkpoint} owner=${task.ownerSessionId} goal="${task.goal}" updated=${task.updatedAt}`
+      ? `active ${task.taskId} rev=${task.revision} iter=${task.iteration}${checkpoint}${next}${issues} owner=${task.ownerSessionId} goal="${task.goal}" updated=${task.updatedAt}`
       : `${task.state} ${task.taskId} outcome=${task.outcome ?? "none"} goal="${task.goal}" updated=${task.updatedAt}`;
   if (!viewerSessionId || task.state !== "active") return base;
   return viewerSessionId === task.ownerSessionId

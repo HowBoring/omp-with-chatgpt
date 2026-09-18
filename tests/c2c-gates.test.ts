@@ -44,16 +44,30 @@ describe("protocol gates", () => {
     if (verdict.blocked) expect(verdict.reason).toContain("REVIEW");
   });
 
-  it("never gates read-only tools, non-owner sessions, or non-gated states", () => {
+  it("never gates read-only tools or non-waiting states", () => {
     const gated = taskIn({ waitingFor: "GPT_PLAN" });
     expect(toolGateVerdict(gated, "owner", "read").blocked).toBe(false);
     expect(toolGateVerdict(gated, "owner", "grep").blocked).toBe(false);
-    expect(toolGateVerdict(gated, "intruder", "write").blocked).toBe(false);
 
     const noCheckpoint = taskIn({});
     expect(toolGateVerdict(noCheckpoint, "owner", "write").blocked).toBe(false);
 
     expect(toolGateVerdict(null, "owner", "write").blocked).toBe(false);
+  });
+
+  it("gates modifying tools for subagents and other sessions while awaiting PLAN or REVIEW", () => {
+    // Subagent work belongs to the owning task (issue #8): review must
+    // complete before ANY session's new edits land (issue #7).
+    const gated = taskIn({ waitingFor: "GPT_PLAN" });
+    expect(toolGateVerdict(gated, "intruder", "write").blocked).toBe(true);
+    expect(toolGateVerdict(gated, "subagent-session", "bash").blocked).toBe(true);
+
+    const review = taskIn({ waitingFor: "GPT_REVIEW" });
+    expect(toolGateVerdict(review, "intruder", "edit").blocked).toBe(true);
+
+    const executing = taskIn({ waitingFor: "none" });
+    expect(toolGateVerdict(executing, "subagent-session", "write").blocked).toBe(false);
+    expect(toolGateVerdict(executing, "intruder", "write").blocked).toBe(false);
   });
 
   it("stop gate blocks completion only while the owner awaits REVIEW", () => {
